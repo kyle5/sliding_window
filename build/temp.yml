@@ -1,0 +1,3 @@
+%YAML:1.0
+my_random_trees: !!opencv-ml-random-trees
+   nclasses: 2

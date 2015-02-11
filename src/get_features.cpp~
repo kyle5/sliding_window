@@ -1,0 +1,108 @@
+vector<KeyPoint> get_grid_over_valid_pixels( Mat mask_img ) {
+  vector<KeyPoint> kps;
+  float sift_scale = 5;
+  // 10 * 10 grid over the image
+  for ( int i = 20; i < mask_img.rows - 20; i += 4 )
+  for ( int j = 20; j < mask_img.cols - 20; j += 4 )
+  {
+    if ( mask_img.at<uchar>(i, j) > 100 ){
+      kps.push_back( KeyPoint( j, i, sift_scale ) );
+    }
+  }
+  return kps;
+}
+
+Mat get_color_features( const Mat image, int scale_of_features, vector<KeyPoint> grid_kps ) {
+  // for keypoint get the features
+  
+  return color_features;
+}
+
+Mat get_texture_features( const Mat image ) {
+  
+  return texture_features;
+}
+
+Mat get_features( SIFT &extractor, string raw_img_path, string mask_img_path, int scale_of_features ) {
+  Mat ret;
+  // lay down a grid 
+  Mat mask_img = imread( mask_img_path );
+  string str = type2str( mask_img.type() );
+  fprintf( stderr, "img_path: %s\ntype img mask read: %s\n", mask_img_path.c_str(), str.c_str() );
+  Mat mask_img_gray, mask_img_binary;
+  cvtColor( mask_img, mask_img_gray, CV_BGR2GRAY );
+  threshold( mask_img_gray, mask_img_binary, 240, 255, THRESH_BINARY );
+  cerr << string( "type is : ") << type2str( mask_img_binary.type() ) << endl;
+  vector<KeyPoint> grid_kps = get_grid_over_valid_pixels( mask_img_binary );
+  // get all the features that I can
+  Mat raw_img = imread( raw_img_path );
+  // get the color features
+  Mat get_color_features( raw_img, scale_of_features, grid_kps );
+  Mat gray_img;
+  fprintf( stderr, "img_path: %s\ntype img raw read: %s\n", raw_img_path.c_str(), str.c_str() );
+  cvtColor( raw_img, gray_img, CV_BGR2GRAY );
+  Mat descriptorsA;
+  fprintf( stderr, "rows: %d\ncols: %d\n", gray_img.rows, gray_img.cols );
+  str = type2str( gray_img.type() );
+  fprintf( stderr, "type: %s\n", str.c_str() );
+  extractor.compute( gray_img, grid_kps, descriptorsA );
+  fprintf(stderr, "fs wi: %d\n", descriptorsA.rows );
+  fprintf( stderr, "computed descriptors\n" );
+  // get the color features here
+
+  Mat combine_color_and_texture_features(  );
+  return descriptorsA;
+}
+
+
+// f get features 
+struct features get_all_features( struct filepaths file_pts ) {
+  int scale_of_features = 5;
+  SiftDescriptorExtractor extractor;
+	struct features ret;
+  int length_features = 0, l_negative = 0, l_positive = 0;
+  int neg_imgs = (int) file_pts.filepaths_negative_raw.size();
+  vector<Mat> features_smooth( neg_imgs );  
+  for ( int i = 0; i < neg_imgs; i++ ) {
+    Mat features_mask = get_features( extractor, file_pts.filepaths_negative_raw[i], file_pts.filepaths_negative_mask[i], scale_of_features );
+    features_smooth[i] = features_mask;
+    l_negative += features_mask.rows;
+    fprintf( stderr, "negatives fs: %d : %d\n ", features_mask.rows, features_mask.cols );
+  }
+  length_features += l_negative;
+  int pos_imgs = (int) file_pts.filepaths_positive_raw.size();
+  vector<Mat> features_rough(pos_imgs);
+  for ( int i = 0; i < pos_imgs; i++ ) {
+    Mat features_mask = get_features( extractor, file_pts.filepaths_positive_raw[i], file_pts.filepaths_positive_mask[i], scale_of_features );
+    features_rough[i] = features_mask;
+    l_positive += features_mask.rows;
+    fprintf( stderr, "positives fs: %d : %d\n ", features_mask.rows, features_mask.cols );
+  }
+  fprintf( stderr, "neg: %d\npos: %d\n", l_negative, l_positive );
+  length_features += l_positive;
+  Mat all_labels = Mat::zeros( length_features, 1, CV_32F );
+  fprintf( stderr, "l_negative: %d : l_positive: %d\n", l_negative, l_positive );
+  Mat dst_roi = all_labels( Rect( 0, l_negative, 1, l_positive ) );
+  Mat temp = Mat::ones( l_positive, 1, CV_32F );
+  temp.copyTo( dst_roi );
+
+  vector<Mat> combined_features = features_smooth;
+  combined_features.insert( combined_features.end(), features_rough.begin(), features_rough.end() );
+  
+  // PCA on the texture features before combining them 
+  Mat text_color_features = Mat::zeros( length_features, 128, combined_features[0].type() );
+  int st = -1, end = -1;
+  for ( int i = 0; i < (int) combined_features.size(); i++ ) {
+    Mat cur_features = combined_features[i];
+    st = end + 1;
+    end = st + cur_features.rows - 1;
+    fprintf( stderr, "st: %d: cur_features.cols: %d: cur_features.rows: %d\n", st, cur_features.cols, cur_features.rows );
+    Mat dst_roi = text_color_features( Rect(0, st, cur_features.cols, cur_features.rows) );
+    cur_features.copyTo( dst_roi );
+  }
+  ret.text_color_features = text_color_features;
+  ret.length_features = length_features;
+  ret.all_labels = all_labels;
+  return ret;
+}
+

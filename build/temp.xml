@@ -1,0 +1,4 @@
+<?xml version="1.0"?>
+<opencv_storage>
+<my_random_trees type_id="opencv-ml-random-trees">
+  <nclasses>2</nclasses>

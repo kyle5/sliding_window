@@ -1,0 +1,233 @@
+//////////////////////////////////////////////////////////           INCLUDE              /////////////////////////////////////////////////////////////////
+#include <stdio.h>
+#include <string>
+#include <dirent.h>
+#include <stdexcept>
+
+#include <main.h>
+
+using namespace std;
+using namespace cv;
+
+//////////////////////////////////////////////////////////           HELPER FS              /////////////////////////////////////////////////////////////////
+// f calculate paths
+struct directory_paths calculate_paths( string root_directory ) {
+	struct directory_paths ret;
+	root_directory = root_directory + string("");
+	ret.root_training_directory = root_directory + string( "training/" );
+	ret.positives_training_directory = ret.root_training_directory + string( "positives/" );
+	ret.positives_training_directory_raw = ret.positives_training_directory + string("raw/");
+	ret.positives_training_directory_mask = ret.positives_training_directory + string("mask/");
+	ret.negatives_training_directory = ret.root_training_directory + string( "negatives/" );
+	ret.negatives_training_directory_raw = ret.root_training_directory + string( "raw/" );
+	ret.negatives_training_directory_mask = ret.root_training_directory + string( "mask/" );
+	ret.root_testing_directory = root_directory + string( "testing/" );;
+	return ret;
+}
+
+vector<string> get_files_from_directory( string directory_given ) {
+  DIR *dir;
+  struct dirent *ent;
+  vector<string> filepaths;
+  if ( ( dir = opendir ( directory_given.c_str() ) ) != NULL ) {
+    /* print all the files and directories within directory */
+    while ((ent = readdir (dir)) != NULL) {
+      printf ("%s\n", ent->d_name);
+      string cur_str( ent->d_name );
+      filepaths.push_back( cur_str );
+    }
+    closedir (dir);
+  } else {
+    /* could not open directory */
+    throw runtime_error( "get_files_from_directory( ) : Could not open the directory!?" );
+  }
+  return filepaths;
+}
+
+struct filepaths calculate_filepaths( directory_paths directory_paths_apple_parts ) {
+  struct filepaths ret;
+  // for each positive image : save filepath : label set to 0
+  vector<string> positive_filepaths_raw = get_files_from_directory( directory_paths_apple_parts.positives_training_directory_raw );
+  for ( int i = 0; i < (int) positive_filepaths_raw.size(); i++ ) {
+    ret.filepaths_positive_raw.push_back( positive_filepaths_raw[i] );
+  }
+  vector<string> positive_filepaths_mask = get_files_from_directory( directory_paths_apple_parts.positives_training_directory_mask );
+  for ( int i = 0; i < (int) positive_filepaths_mask.size(); i++ ) {
+    ret.filepaths_positive_mask.push_back( positive_filepaths_mask[i] );
+  }
+  vector<string> negatives_filepaths_raw = get_files_from_directory( directory_paths_apple_parts.negatives_training_directory_raw );
+  for ( int i = 0; i < (int) negatives_filepaths_raw.size(); i++ ) {
+    ret.filepaths_negative_raw.push_back( negatives_filepaths_raw[i] );
+  }
+  vector<string> negatives_filepaths_mask = get_files_from_directory( directory_paths_apple_parts.negatives_training_directory_mask );
+  for ( int i = 0; i < (int) negatives_filepaths_mask.size(); i++ ) {
+    ret.filepaths_negative_mask.push_back( negatives_filepaths_mask[i] );
+  }
+  vector<string> testing_filepaths = get_files_from_directory( directory_paths_apple_parts.root_testing_directory );
+  for ( int i = 0; i < (int) testing_filepaths.size(); i++ ) {
+    ret.filepaths_testing.push_back( testing_filepaths[i] );
+  }
+  return ret;
+}
+
+vector<KeyPoint> get_grid_over_valid_pixels( Mat mask_img ) {
+  mask_img.convertTo( mask_img, CV_8U );
+  vector<KeyPoint> kps;
+  sift_scale = 5;
+  // 10 * 10 grid over the image
+  for ( int i = 10; i < raw_img.rows; i ++ )
+  for ( int j = 10; j < raw_img.cols; j ++ )
+  {
+    if ( mask_img.at<uchar>(i, j) > 1 )
+      kps.push_back( KeyPoint( i, j, sift_scale ) );
+  }
+  return kps;
+}
+
+Mat get_features( SIFT &extractor, string raw_img_path, string mask_img_path ) {
+  Mat ret;
+  // lay down a grid 
+  vector<KeyPoint> grid_kps = get_grid_over_valid_pixels( mask_img_path );
+  // get all the features that I can
+  Mat raw_img = imread( raw_img_path );
+  Mat gray_img;
+  raw_img.convertTo( gray_img, CV_BGR2GRAY );
+  Mat descriptorsA;
+  extractor.compute( gray_img, grid_kps, descriptorsA );
+  // get the color features here
+  return descriptorsA;
+}
+
+
+// f get features 
+struct features get_all_features( struct filepaths filepaths_apple_parts ) {
+	struct features ret;
+  vector<Mat> features_smooth;
+  length_features = 0;
+  for ( int i = 0; i < (int) ret.filepaths_negative_raw.size(); i++ ) {
+    Mat features_mask = get_features( ret.filepaths_negative_raw[i], ret.filepaths_negative_mask[i] );
+    features_smooth.push_back( features_mask );
+    length_features += features_mask.rows;
+  }
+  vector<apple_part> labels_smooth( (int) features_smooth.size(), APPLE_SMOOTH );
+  vector<Mat> features_rough;
+  for ( int i = 0; i < (int) ret.filepaths_positive_raw.size(); i++ ) {
+    Mat features_mask = get_features( ret.filepaths_positive_raw[i], ret.filepaths_positive_mask[i] );
+    features_rough.push_back( features_mask );
+    length_features += features_mask.rows;
+  }
+  vector<apple_part> labels_rough( (int) features_rough.size(), APPLE_ROUGH );
+
+  vector<Mat> combined_features = features_smooth;
+  combined_features.insert( combined_features.end(), features_rough.begin(), features_rough.end() );
+  vector<apple_part> combined_labels = labels_smooth;
+  combined_labels.insert( combined_labels.end(), labels_rough.begin(), labels_rough.end() );
+  
+  // PCA on the texture features before combining them 
+  Mat combined_features = Mat::zeros( length_features, ret.text_color_features[0].cols );
+  vector<apple_part> combined_labels_final( length_features );
+  int st = -1, end = -1;
+  for ( int i = 0; i < (int) combined_features.size(); i++ ) {
+    Mat cur_features = combined_features[i];
+    int cur_features_length = (int) cur_features.rows;
+    apple_part cur_label = combined_labels[i];
+    st = end + 1;
+    end = st + cur_features_length - 1;
+    Mat dst_roi = combined_features(Rect(0, st, cur_features.cols, cur_features.rows));
+    cur_features.copyTo(dst_roi);
+    combined_labels_final.insert( combined_labels_final.end(), cur_features_length, cur_label );
+  }
+  ret.text_color_features = combined_features;
+  ret.labels = combined_labels_final;
+  ret.length_features = length_features;
+  return ret;
+}
+
+// f train rand forest
+CvRTrees create_random_forest( struct features features_apple_parts ) {
+  CvRTrees randomForest;
+  pca_num_components = 32;
+  randomForest_max_depth = 15;
+  randomForest_min_sample_count = 50;
+  randomForest_regression_accuracy = 0.f;
+  randomForest_use_surrogates = false;
+  randomForest_max_categories = 2;
+  randomForest_priors = 0;
+  randomForest_calc_var_importance = false;
+  randomForest_nactive_vars = 100;
+  randomForest_max_trees = 75;
+  randomForest_forest_accuracy = 0;
+  randomForest_term_criteria = CV_TERMCRIT_ITER;
+
+  randomForest_params = CvRTParams(
+    randomForest_max_depth, // max_depth,
+    randomForest_min_sample_count, // min_sample_count,
+    randomForest_regression_accuracy, // regression_accuracy,
+    randomForest_use_surrogates, // use_surrogates,
+    randomForest_max_categories, // max_categories,
+    randomForest_priors, // priors,
+    randomForest_calc_var_importance, // calc_var_importance,
+    randomForest_nactive_vars, // nactive_vars,
+    randomForest_max_trees, // max_num_of_trees_in_the_forest,
+    randomForest_forest_accuracy, // forest_accuracy,
+    randomForest_term_criteria // termcrit_type
+  );
+
+  Mat training_features = features_apple_parts.text_color_features;
+  Mat responses = Mat::zeros( (int) labels.size(), 1, CV_32F );
+  for ( int i = 0; i < (int) responses.size(); i++ ) {
+    responses.at<float>(i, 0) = ( features_apple_parts.labels[i] == APPLE_ROUGH ) ? 1 : 0;
+  }
+  randomForest.train( training_features, CV_COL_SAMPLE, responses, Mat(), Mat(), Mat(), Mat(), randomForest_params);
+  return randomForest;
+}
+
+int main( ) {
+  int recomp = atoi(argv[1]);
+  CvRTrees randomForest;
+  string file( "/home/kyle/rand_forest_temp.xml" );
+  if ( recomp ) {
+	  //////////////////////////////////////////////////////////           TRAINING              /////////////////////////////////////////////////////////////////	
+	  string root_directory = "/home/kyle/sliding_window_apple_detection/";
+	  // setup the pos and neg paths
+	  struct directory_paths directory_paths_apple_parts = calculate_paths( root_directory );
+	  struct filepaths filepaths_apple_parts = calculate_filepaths( directory_paths_apple_parts );
+	  // open the directory of images
+	  // get the image paths
+	  // for each of the neg and pos features
+		  // extract the features of the pos and neg images
+	  struct features features_apple_parts = get_all_features( filepaths_apple_parts );
+	  // train rand forest using the extracted features
+	  randomForest = create_random_forest( features_apple_parts );
+	  // save the random forest
+    fprintf(stderr, "Write classifier data to file\n");
+    FileStorage storage( file.c_str(), cv::FileStorage::WRITE );
+    randomForest.write( *storage, "random_tree" );
+    storage.release();
+  } else {
+    FileStorage storage( file.c_str(), cv::FileStorage::READ );
+    randomForest.read( *storage, "random_tree" );
+    storage.release();
+  }
+  
+	//////////////////////////////////////////////////////////           TESTING              /////////////////////////////////////////////////////////////////
+  
+	// 1/8 - 1/4 of the image that is being utilized
+	// 3:1, 2:1, and 1:1 aspect ratios
+	// setup the (high/low) scale and the (steps)
+	// setup every scale to extract features at 
+	// setup the aspect ratios that should be searched
+  scales = {0.125, 0.1875, 0.25};
+	aspect_ratios = {3, 2, 1};
+	// find the image paths of the images that have already been classified
+	string img_root_path = "";
+	// for each image that has a classification of pixels that are apple
+		// load the image
+		// figure out which format the image is in and get the image to a single format
+		// find the bounding boxes of the features
+		// for loop through aspect ratios
+			// for loop through scales
+				// for loop through the x and y directions
+					// run classifier over the section that the classifier is currently over
+	return 0;
+}

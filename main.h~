@@ -1,0 +1,28 @@
+enum apple_part { APPLE_SMOOTH, APPLE_ROUGH };
+
+struct directory_paths {
+	std::string root_training_directory;
+	std::string positives_training_directory;
+	std::string positives_training_directory_raw;
+	std::string positives_training_directory_mask;
+	std::string negatives_training_directory;
+	std::string negatives_training_directory_raw;
+	std::string negatives_training_directory_mask;
+	std::string root_testing_directory;
+};
+
+struct filepaths {
+  std::vector<std::string> filepaths_positive_raw;
+  std::vector<std::string> filepaths_positive_mask;
+  std::vector<std::string> filepaths_negative_raw;
+  std::vector<std::string> filepaths_negative_mask;
+
+  std::vector<std::string> filepaths_testing;
+};
+
+struct features {
+  // needs to have : features, labels
+  std::vector<cv::Mat> text_color_features;
+  std::vector<apple_part> labels;
+  int length_features;
+};
